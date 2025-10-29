@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SICSR Timetable</title>
+    <link rel="stylesheet" href="styles/styles.css">
+
+    <!-- Universal Favicon (works for most browsers + mobile) -->
+    <link rel="icon" type="image/png" href="./logo.png">
+    <link rel="apple-touch-icon" href="./logo.png">
+    <link rel="shortcut icon" href="./logo.png" type="image/png">
+
+    <!-- Optional for Android + Windows theme color -->
+    <meta name="theme-color" content="#ffffff">
+</head>
+
+
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 SICSR Timetable</h1>
+        </header>
+
+        <!-- Loading Screen -->
+        <div id="loadingScreen" class="loading-screen">
+            <div class="spinner"></div>
+            <p>Loading batches...</p>
+        </div>
+
+        <!-- Main Content -->
+        <div id="mainContent" class="main-content" style="display: none;">
+            <!-- Controls -->
+            <div class="controls">
+                <button id="selectBatchBtn" class="btn btn-primary">
+                    Select Batches
+                    <span class="icon">▼</span>
+                </button>
+                <button id="jumpToDateBtn" class="btn btn-secondary">
+                    <span id="currentDate">Today</span>
+                    <span class="icon">📅</span>
+                </button>
+            </div>
+
+            <!-- Progress Bar for courses loading -->
+            <div id="coursesProgress" class="progress-bar" style="display: none;">
+                <div class="spinner-small"></div>
+                <span>Loading courses...</span>
+            </div>
+
+            <!-- Courses List -->
+            <div id="coursesList" class="courses-list">
+                <!-- Courses will be populated here -->
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Made By <a href="https://github.com/TriforceParas" target="_blank" rel="noopener noreferrer">TriforceParas</a> ©</p>
+        </footer>
+
+        <!-- Fixed Timeline Navigation (moved to bottom) -->
+        <div class="timeline" id="timeline" style="display: none;">
+            <button id="yesterdayBtn" class="btn btn-nav">◀ Yesterday</button>
+            <button id="tomorrowBtn" class="btn btn-nav">Tomorrow ▶</button>
+        </div>
+
+        <!-- Batch Selection Modal -->
+        <div id="batchModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Select Batches</h2>
+                    <span class="close">&times;</span>
+                </div>
+                <div class="batch-selection" id="batchSelection">
+                    <!-- Batch checkboxes will be populated here -->
+                </div>
+                <div class="modal-footer">
+                    <button id="saveBatchesBtn" class="btn btn-primary">Save & Refresh</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Date Picker Modal -->
+        <div id="dateModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Select Date</h2>
+                    <span class="close-date">&times;</span>
+                </div>
+                <div class="date-picker">
+                    <input type="date" id="datePicker" class="date-input">
+                </div>
+                <div class="modal-footer">
+                    <button id="selectDateBtn" class="btn btn-primary">Go to Date</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="scripts/script.js"></script>
+</body>
+</html>
