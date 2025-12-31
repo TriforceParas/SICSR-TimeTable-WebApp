@@ -4,28 +4,59 @@
 // API Configuration
 const API_CONFIG = {
     BASE_URL: 'http://time-table.sicsr.ac.in/report.php',
-    CORS_PROXY: 'https://api.allorigins.win/raw?url=' // CORS proxy for browser requests
+    // Multiple CORS proxies for fallback
+    CORS_PROXIES: [
+        { url: 'https://api.allorigins.win/get?url=', type: 'json', field: 'contents' },
+        { url: 'https://api.codetabs.com/v1/proxy?quest=', type: 'text' },
+        { url: 'https://corsproxy.org/?', type: 'text' },
+    ],
+    TIMEOUT: 15000,
+    MAX_RETRIES: 2
 };
 
-// HTTP Helper Class - Replicates Http.java
+// Current proxy index
+let currentProxyIndex = 0;
+
+// HTTP Helper Class
 class HttpClient {
     static async get(url) {
-        const proxiedUrl = API_CONFIG.CORS_PROXY + encodeURIComponent(url);
+        const totalAttempts = API_CONFIG.CORS_PROXIES.length * API_CONFIG.MAX_RETRIES;
+        let lastError;
 
-        while (true) {
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            const proxy = API_CONFIG.CORS_PROXIES[currentProxyIndex];
+            
             try {
-                const response = await fetch(proxiedUrl);
-                if (!response.ok) throw new Error('Network error');
-                return await response.text();
+                const proxiedUrl = proxy.url + encodeURIComponent(url);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
+
+                const response = await fetch(proxiedUrl, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                let data;
+                if (proxy.type === 'json') {
+                    const json = await response.json();
+                    data = json[proxy.field];
+                } else {
+                    data = await response.text();
+                }
+
+                if (!data || data.length < 50) throw new Error('Empty response');
+                
+                console.log(`✓ Fetched via ${proxy.url}`);
+                return data;
             } catch (error) {
-                console.error('GET request failed, retrying...', error);
-                await this.sleep(1000);
+                lastError = error;
+                console.warn(`Proxy ${currentProxyIndex + 1} failed:`, error.message);
+                currentProxyIndex = (currentProxyIndex + 1) % API_CONFIG.CORS_PROXIES.length;
+                await new Promise(r => setTimeout(r, 500));
             }
         }
-    }
 
-    static sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        throw new Error('All proxies failed: ' + lastError.message);
     }
 }
 
@@ -36,23 +67,82 @@ class TimetableManager {
         this.selectedBatches = new Map();
     }
 
-    // Parse batches from HTML - replicates getBatches()
+    // Load batches - try from server first, fallback to cached
     async loadBatches() {
         try {
             const html = await HttpClient.get(API_CONFIG.BASE_URL);
+            // Target the typematch select specifically
             const pattern = /<option value="([a-zA-Z])">([^<]+)<\/option>/g;
             let match;
+            let count = 0;
 
             while ((match = pattern.exec(html)) !== null) {
                 const value = match[1];
                 const name = match[2];
-                this.batches.set(name, { name, value });
+                // Skip placeholder options like "type.o", "type.p", etc.
+                if (!name.startsWith('type.')) {
+                    this.batches.set(name, { name, value });
+                    count++;
+                }
             }
 
-            return this.batches;
+            if (count > 0) {
+                console.log(`✓ Loaded ${count} batches from server`);
+                // Cache batches to localStorage for offline fallback
+                this.cacheBatches();
+                return this.batches;
+            }
+            throw new Error('No batches found in response');
         } catch (error) {
-            console.error('Failed to load batches:', error);
-            throw error;
+            console.warn('Failed to load batches from server:', error.message);
+            
+            // Try to load from cache
+            if (this.loadCachedBatches()) {
+                console.log(`✓ Loaded ${this.batches.size} batches from cache`);
+                return this.batches;
+            }
+            
+            // No cache available - throw error
+            throw new Error('Could not load batches. Please check your internet connection.');
+        }
+    }
+
+    // Cache batches to localStorage
+    cacheBatches() {
+        try {
+            const batchArray = Array.from(this.batches.values());
+            localStorage.setItem('cachedBatches', JSON.stringify(batchArray));
+            localStorage.setItem('cachedBatchesTimestamp', Date.now().toString());
+            console.log(`✓ Cached ${batchArray.length} batches`);
+        } catch (error) {
+            console.warn('Failed to cache batches:', error);
+        }
+    }
+
+    // Load batches from localStorage cache
+    loadCachedBatches() {
+        try {
+            const cached = localStorage.getItem('cachedBatches');
+            if (!cached) return false;
+
+            const batchArray = JSON.parse(cached);
+            if (!Array.isArray(batchArray) || batchArray.length === 0) return false;
+
+            batchArray.forEach(batch => {
+                this.batches.set(batch.name, { name: batch.name, value: batch.value });
+            });
+
+            // Show when cache was last updated
+            const timestamp = localStorage.getItem('cachedBatchesTimestamp');
+            if (timestamp) {
+                const date = new Date(parseInt(timestamp));
+                console.log(`Cache from: ${date.toLocaleDateString()}`);
+            }
+
+            return true;
+        } catch (error) {
+            console.warn('Failed to load cached batches:', error);
+            return false;
         }
     }
 
@@ -83,7 +173,7 @@ class TimetableManager {
     // Get courses for selected batches and date - replicates Batch.getCourses()
     async getCourses(date) {
         if (this.selectedBatches.size === 0) {
-            return [this.createEmptyCourse()];
+            return [this.createNoBatchSelectedCourse()];
         }
 
         try {
@@ -107,7 +197,7 @@ class TimetableManager {
             return courses.length > 0 ? courses : [this.createEmptyCourse()];
         } catch (error) {
             console.error('Failed to load courses:', error);
-            return [this.createEmptyCourse()];
+            return [this.createErrorCourse()];
         }
     }
 
@@ -191,10 +281,33 @@ class TimetableManager {
     // Create empty course placeholder
     createEmptyCourse() {
         return {
-            description: '❓',
-            room: '❓',
-            startTime: '❓',
-            endTime: '❓'
+            description: 'No Classes Scheduled',
+            room: '-',
+            startTime: '-',
+            endTime: '-',
+            isEmpty: true
+        };
+    }
+
+    // Create placeholder when no batch selected
+    createNoBatchSelectedCourse() {
+        return {
+            description: 'Please select a batch',
+            room: '-',
+            startTime: '-',
+            endTime: '-',
+            isNoBatch: true
+        };
+    }
+
+    // Create error placeholder
+    createErrorCourse() {
+        return {
+            description: 'Failed to load - tap to retry',
+            room: '-',
+            startTime: '-',
+            endTime: '-',
+            isError: true
         };
     }
 }
@@ -259,7 +372,16 @@ class UIManager {
             await this.loadCourses();
         } catch (error) {
             console.error('Initialization failed:', error);
-            this.showError('Failed to load application. Please refresh the page.');
+            // Show error with retry button in loading screen
+            this.loadingScreen.innerHTML = `
+                <div class="error-state">
+                    <h3>Connection Error</h3>
+                    <p>${error.message}</p>
+                    <button class="btn btn-primary" onclick="location.reload()">
+                        Retry
+                    </button>
+                </div>
+            `;
         }
     }
 
@@ -393,15 +515,32 @@ class UIManager {
     renderCourses(courses) {
         this.coursesList.innerHTML = '';
 
-        if (courses.length === 0 || (courses.length === 1 && courses[0].description === '❓')) {
-            const empty = document.createElement('div');
-            empty.className = 'empty-state';
-            empty.innerHTML = `
-                <h3>No Classes Found</h3>
-                <p>There are no classes scheduled for this day.</p>
-            `;
-            this.coursesList.appendChild(empty);
-            return;
+        // Handle special states
+        if (courses.length === 1) {
+            const course = courses[0];
+            if (course.isEmpty || course.isNoBatch || course.isError) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                
+                if (course.isNoBatch) {
+                    empty.innerHTML = `
+                        <h3>No Batch Selected</h3>
+                        <p>Please select one or more batches to view the timetable.</p>
+                    `;
+                } else if (course.isError) {
+                    empty.innerHTML = `
+                        <h3>Connection Error</h3>
+                        <p>Failed to load timetable. Please check your connection and try again.</p>
+                    `;
+                } else {
+                    empty.innerHTML = `
+                        <h3>No Classes Found</h3>
+                        <p>There are no classes scheduled for this day.</p>
+                    `;
+                }
+                this.coursesList.appendChild(empty);
+                return;
+            }
         }
 
         courses.forEach(course => {
@@ -409,25 +548,37 @@ class UIManager {
             card.className = 'course-card';
 
             card.innerHTML = `
-                <div class="course-name">${course.description}</div>
+                <div class="course-name">${this.escapeHtml(course.description)}</div>
                 <div class="course-details">
                     <div class="course-detail">
-                        <span>🚪</span>
-                        <span>${course.room}</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M13 4h3a2 2 0 0 1 2 2v14"/>
+                            <path d="M2 20h3"/>
+                            <path d="M13 20h9"/>
+                            <path d="M10 12v.01"/>
+                            <path d="M13 4.562v16.157a1 1 0 0 1-1.242.97L5 20V5.562a2 2 0 0 1 1.515-1.94l4-1A2 2 0 0 1 13 4.561Z"/>
+                        </svg>
+                        <span>${this.escapeHtml(course.room)}</span>
                     </div>
                     <div class="course-detail">
-                        <span>🕧</span>
-                        <span>${course.startTime}</span>
-                    </div>
-                    <div class="course-detail">
-                        <span>🕝</span>
-                        <span>${course.endTime}</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <span>${this.escapeHtml(course.startTime)} - ${this.escapeHtml(course.endTime)}</span>
                     </div>
                 </div>
             `;
 
             this.coursesList.appendChild(card);
         });
+    }
+
+    // Escape HTML to prevent XSS
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     setButtonsEnabled(enabled) {
