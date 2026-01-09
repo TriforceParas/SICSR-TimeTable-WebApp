@@ -25,7 +25,7 @@ class HttpClient {
 
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
             const proxy = API_CONFIG.CORS_PROXIES[currentProxyIndex];
-            
+
             try {
                 const proxiedUrl = proxy.url + encodeURIComponent(url);
                 const controller = new AbortController();
@@ -45,7 +45,7 @@ class HttpClient {
                 }
 
                 if (!data || data.length < 50) throw new Error('Empty response');
-                
+
                 console.log(`✓ Fetched via ${proxy.url}`);
                 return data;
             } catch (error) {
@@ -95,13 +95,13 @@ class TimetableManager {
             throw new Error('No batches found in response');
         } catch (error) {
             console.warn('Failed to load batches from server:', error.message);
-            
+
             // Try to load from cache
             if (this.loadCachedBatches()) {
                 console.log(`✓ Loaded ${this.batches.size} batches from cache`);
                 return this.batches;
             }
-            
+
             // No cache available - throw error
             throw new Error('Could not load batches. Please check your internet connection.');
         }
@@ -151,23 +151,45 @@ class TimetableManager {
         try {
             const saved = localStorage.getItem('selectedBatches');
             if (saved) {
-                const selectedNames = JSON.parse(saved);
-                selectedNames.forEach(name => {
-                    const batch = this.batches.get(name);
-                    if (batch) {
-                        this.selectedBatches.set(name, batch);
+                const selectedData = JSON.parse(saved);
+
+                // Handle both old format (array of names) and new format (array of objects)
+                selectedData.forEach(item => {
+                    if (typeof item === 'string') {
+                        // Old format: just batch name - try to find in batches Map
+                        const batch = this.batches.get(item);
+                        if (batch) {
+                            this.selectedBatches.set(item, batch);
+                        }
+                    } else if (item && item.name && item.value) {
+                        // New format: object with name and value
+                        // First try to find in batches Map (in case value changed)
+                        const existingBatch = this.batches.get(item.name);
+                        if (existingBatch) {
+                            this.selectedBatches.set(item.name, existingBatch);
+                        } else {
+                            // Fallback: use the stored value directly
+                            this.selectedBatches.set(item.name, { name: item.name, value: item.value });
+                            // Also add to batches Map for consistency
+                            this.batches.set(item.name, { name: item.name, value: item.value });
+                        }
                     }
                 });
+
+                console.log(`✓ Restored ${this.selectedBatches.size} selected batches`);
             }
         } catch (error) {
             console.error('Failed to load saved batches:', error);
         }
     }
 
-    // Save selected batches to localStorage
+    // Save selected batches to localStorage (store both name and value)
     saveSelectedBatches() {
-        const selectedNames = Array.from(this.selectedBatches.keys());
-        localStorage.setItem('selectedBatches', JSON.stringify(selectedNames));
+        const selectedBatchesArray = Array.from(this.selectedBatches.values()).map(batch => ({
+            name: batch.name,
+            value: batch.value
+        }));
+        localStorage.setItem('selectedBatches', JSON.stringify(selectedBatchesArray));
     }
 
     // Get courses for selected batches and date - replicates Batch.getCourses()
@@ -521,7 +543,7 @@ class UIManager {
             if (course.isEmpty || course.isNoBatch || course.isError) {
                 const empty = document.createElement('div');
                 empty.className = 'empty-state';
-                
+
                 if (course.isNoBatch) {
                     empty.innerHTML = `
                         <h3>No Batch Selected</h3>
