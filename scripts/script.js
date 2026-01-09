@@ -4,14 +4,14 @@
 // API Configuration
 const API_CONFIG = {
     BASE_URL: 'http://time-table.sicsr.ac.in/report.php',
-    // Multiple CORS proxies for fallback
+    // Multiple CORS proxies for fallback (ordered by reliability)
     CORS_PROXIES: [
-        { url: 'https://api.allorigins.win/get?url=', type: 'json', field: 'contents' },
         { url: 'https://api.codetabs.com/v1/proxy?quest=', type: 'text' },
-        { url: 'https://corsproxy.org/?', type: 'text' },
+        { url: 'https://corsproxy.io/?', type: 'text' },
+        { url: 'https://api.allorigins.win/get?url=', type: 'json', field: 'contents' },
     ],
-    TIMEOUT: 15000,
-    MAX_RETRIES: 2
+    TIMEOUT: 30000,
+    MAX_RETRIES: 3
 };
 
 // Current proxy index
@@ -67,44 +67,74 @@ class TimetableManager {
         this.selectedBatches = new Map();
     }
 
-    // Load batches - try from server first, fallback to cached
+    // Load batches - cache-first, background refresh
     async loadBatches() {
-        try {
-            const html = await HttpClient.get(API_CONFIG.BASE_URL);
-            // Target the typematch select specifically
-            const pattern = /<option value="([a-zA-Z])">([^<]+)<\/option>/g;
-            let match;
-            let count = 0;
+        // Step 1: Try to load from cache immediately for instant UI
+        const hasCachedData = this.loadCachedBatches();
 
-            while ((match = pattern.exec(html)) !== null) {
-                const value = match[1];
-                const name = match[2];
-                // Skip placeholder options like "type.o", "type.p", etc.
-                if (!name.startsWith('type.')) {
-                    this.batches.set(name, { name, value });
-                    count++;
-                }
-            }
+        if (hasCachedData) {
+            console.log(`✓ Loaded ${this.batches.size} batches from cache (instant)`);
 
-            if (count > 0) {
-                console.log(`✓ Loaded ${count} batches from server`);
-                // Cache batches to localStorage for offline fallback
-                this.cacheBatches();
-                return this.batches;
-            }
-            throw new Error('No batches found in response');
-        } catch (error) {
-            console.warn('Failed to load batches from server:', error.message);
+            // Step 2: Refresh from server in background (for next time)
+            this.refreshBatchesInBackground();
 
-            // Try to load from cache
-            if (this.loadCachedBatches()) {
-                console.log(`✓ Loaded ${this.batches.size} batches from cache`);
-                return this.batches;
-            }
-
-            // No cache available - throw error
-            throw new Error('Could not load batches. Please check your internet connection.');
+            return this.batches;
         }
+
+        // No cache - must fetch from server (first time user)
+        console.log('No cache found, fetching from server...');
+        return await this.fetchBatchesFromServer();
+    }
+
+    // Background refresh - doesn't block UI
+    refreshBatchesInBackground() {
+        // Use setTimeout to ensure this runs after the current execution
+        setTimeout(async () => {
+            try {
+                console.log('Background: Refreshing batches from server...');
+                await this.fetchBatchesFromServer();
+                console.log('✓ Background refresh complete');
+            } catch (error) {
+                console.warn('Background refresh failed (will use cached data):', error.message);
+            }
+        }, 100);
+    }
+
+    // Actually fetch batches from server
+    async fetchBatchesFromServer() {
+        const html = await HttpClient.get(API_CONFIG.BASE_URL);
+
+        // Parse HTML response
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const select = doc.getElementById('typematch');
+
+        if (!select) throw new Error('Batch selection list not found');
+
+        const options = select.getElementsByTagName('option');
+        let count = 0;
+
+        // Clear and reload batches
+        this.batches.clear();
+
+        for (const option of options) {
+            const value = option.value;
+            const name = option.textContent.trim();
+
+            // Skip placeholder options like "type.o", "type.p", etc.
+            if (value && name && !name.startsWith('type.') && name !== 'Common Batch' && name !== 'BREAK') {
+                this.batches.set(name, { name, value });
+                count++;
+            }
+        }
+
+        if (count > 0) {
+            console.log(`✓ Loaded ${count} batches from server`);
+            // Cache batches to localStorage for next time
+            this.cacheBatches();
+            return this.batches;
+        }
+        throw new Error('No valid batches found');
     }
 
     // Cache batches to localStorage
@@ -240,6 +270,45 @@ class TimetableManager {
         return url;
     }
 
+    // Build URL for calendar download
+    buildCalendarUrl(date) {
+        // Use the same params but change output_format to 2 (ICS)
+        // and force confirm to match view
+        const url = this.buildCoursesUrl(date);
+        return url.replace('output_format=1', 'output_format=2');
+    }
+
+    async downloadCalendar(date) {
+        if (this.selectedBatches.size === 0) return;
+
+        try {
+            const url = this.buildCalendarUrl(date);
+            // We use direct navigation for download as it's a file attachment
+            // But we need to use the proxy if we want to download it programmatically
+            // However, for ICS files, usually opening the link is enough if the server sends correct headers.
+            // Since we use proxies for everything else, let's fetch the blob and download it to be safe across CORS.
+
+            const content = await HttpClient.get(url);
+
+            // Create blob and download link
+            const blob = new Blob([content], { type: 'text/calendar' });
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = `SICSR_Timetable_${date.toISOString().split('T')[0]}.ics`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(downloadUrl);
+
+            console.log('✓ Calendar downloaded');
+            return true;
+        } catch (error) {
+            console.error('Failed to download calendar:', error);
+            throw error;
+        }
+    }
+
     // Parse course data from CSV line
     parseCourseFromCsv(line) {
         try {
@@ -355,7 +424,9 @@ class UIManager {
         this.yesterdayBtn = document.getElementById('yesterdayBtn');
         this.tomorrowBtn = document.getElementById('tomorrowBtn');
         this.saveBatchesBtn = document.getElementById('saveBatchesBtn');
+        this.saveBatchesBtn = document.getElementById('saveBatchesBtn');
         this.selectDateBtn = document.getElementById('selectDateBtn');
+        this.downloadCalendarBtn = document.getElementById('downloadCalendarBtn');
 
         // Displays
         this.currentDateDisplay = document.getElementById('currentDate');
@@ -415,6 +486,14 @@ class UIManager {
         this.saveBatchesBtn.addEventListener('click', () => this.saveBatches());
         this.selectDateBtn.addEventListener('click', () => this.selectDate());
 
+        this.selectDateBtn.addEventListener('click', () => this.selectDate());
+
+        // Batch Search
+        const searchInput = document.getElementById('batchSearchInput');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => this.filterBatches(e.target.value));
+        }
+
         // Close modals on outside click
         window.addEventListener('click', (e) => {
             if (e.target === this.batchModal) this.closeBatchModal();
@@ -457,6 +536,20 @@ class UIManager {
             });
 
             this.batchSelection.appendChild(item);
+        });
+    }
+
+    filterBatches(query) {
+        const searchTerm = query.toLowerCase().trim();
+        const items = this.batchSelection.getElementsByClassName('batch-item');
+
+        Array.from(items).forEach(item => {
+            const label = item.querySelector('label').textContent.toLowerCase();
+            if (label.includes(searchTerm)) {
+                item.style.display = 'flex';
+            } else {
+                item.style.display = 'none';
+            }
         });
     }
 
@@ -517,20 +610,135 @@ class UIManager {
     }
 
     async loadCourses() {
+        const dateKey = this.getDateKey(this.currentDate);
+
+        // Step 1: Try to load from cache immediately for instant UI
+        const cachedCourses = this.loadCachedTimetable(dateKey);
+
+        if (cachedCourses && cachedCourses.length > 0) {
+            // Show cached data immediately
+            this.renderCourses(cachedCourses);
+            this.setButtonsEnabled(true);
+
+            // Refresh in background
+            this.refreshCoursesInBackground(dateKey);
+            return;
+        }
+
+        // No cache - must fetch from server (show loading)
         this.setButtonsEnabled(false);
         this.coursesProgress.style.display = 'flex';
         this.coursesList.style.display = 'none';
+        this.updateSyncStatus('syncing');
 
         try {
             const courses = await this.timetableManager.getCourses(this.currentDate);
+
+            // Validate course is not error before caching
+            const isError = courses.length === 1 && (courses[0].isError);
+            if (!isError) {
+                this.cacheTimetable(dateKey, courses);
+                this.updateSyncStatus('uptodate');
+            } else {
+                this.updateSyncStatus('error');
+            }
+
             this.renderCourses(courses);
         } catch (error) {
             console.error('Failed to load courses:', error);
-            this.showError('Failed to load courses. Please try again.');
+            this.updateSyncStatus('network');
+
+            // Show empty state since we have no cache
+            this.renderCourses([this.timetableManager.createErrorCourse()]);
         } finally {
             this.coursesProgress.style.display = 'none';
             this.coursesList.style.display = 'block';
             this.setButtonsEnabled(true);
+        }
+    }
+
+    // Background refresh - doesn't block UI
+    refreshCoursesInBackground(dateKey) {
+        this.updateSyncStatus('syncing');
+
+        setTimeout(async () => {
+            try {
+                const courses = await this.timetableManager.getCourses(this.currentDate);
+
+                const isError = courses.length === 1 && (courses[0].isError || courses[0].isNoBatch);
+                if (!isError) {
+                    this.cacheTimetable(dateKey, courses);
+                    // Update UI with fresh data
+                    this.renderCourses(courses);
+                    this.updateSyncStatus('uptodate');
+                } else {
+                    this.updateSyncStatus('uptodate'); // Cache is still valid
+                }
+            } catch (error) {
+                console.warn('Background refresh failed:', error.message);
+                this.updateSyncStatus('network');
+            }
+        }, 100);
+    }
+
+    updateSyncStatus(status) {
+        const statusEl = document.getElementById('syncStatus');
+        if (!statusEl) return;
+
+        const iconEl = statusEl.querySelector('.sync-icon');
+        const textEl = statusEl.querySelector('.sync-text');
+
+        statusEl.className = 'sync-status'; // Reset classes
+
+        switch (status) {
+            case 'syncing':
+                statusEl.classList.add('syncing');
+                if (iconEl) iconEl.innerHTML = '<div class="sync-spinner"></div>';
+                if (textEl) textEl.textContent = 'Updating...';
+                break;
+            case 'uptodate':
+                statusEl.classList.add('uptodate');
+                if (iconEl) iconEl.innerHTML = '✓';
+                if (textEl) textEl.textContent = 'Up to Date';
+                break;
+            case 'network':
+                statusEl.classList.add('network-error');
+                if (iconEl) iconEl.innerHTML = '⚠';
+                if (textEl) textEl.textContent = 'Network Issue';
+                break;
+            case 'error':
+                statusEl.classList.add('backend-error');
+                if (iconEl) iconEl.innerHTML = '✕';
+                if (textEl) textEl.textContent = 'Backend Error';
+                break;
+        }
+    }
+
+    getDateKey(date) {
+        return `timetable_${date.getFullYear()}_${date.getMonth()}_${date.getDate()}_${Array.from(this.timetableManager.selectedBatches.keys()).join('_')}`;
+    }
+
+    cacheTimetable(key, courses) {
+        try {
+            const data = JSON.stringify({
+                timestamp: Date.now(),
+                courses: courses
+            });
+            localStorage.setItem(key, data);
+        } catch (e) {
+            console.warn('Failed to cache timetable');
+        }
+    }
+
+    loadCachedTimetable(key) {
+        try {
+            const data = localStorage.getItem(key);
+            if (!data) return null;
+            const parsed = JSON.parse(data);
+            // Verify it's not too old (optional, here we keep it indefinitely for offline use)
+            return parsed.courses;
+        } catch (e) {
+            return null;
         }
     }
 
@@ -604,10 +812,22 @@ class UIManager {
     }
 
     setButtonsEnabled(enabled) {
-        this.selectBatchBtn.disabled = !enabled;
-        this.jumpToDateBtn.disabled = !enabled;
-        this.yesterdayBtn.disabled = !enabled;
-        this.tomorrowBtn.disabled = !enabled;
+        if (this.selectBatchBtn) this.selectBatchBtn.disabled = !enabled;
+        if (this.jumpToDateBtn) this.jumpToDateBtn.disabled = !enabled;
+        if (this.yesterdayBtn) this.yesterdayBtn.disabled = !enabled;
+        if (this.tomorrowBtn) this.tomorrowBtn.disabled = !enabled;
+        if (this.downloadCalendarBtn) this.downloadCalendarBtn.disabled = !enabled;
+    }
+
+    async downloadCalendar() {
+        this.downloadCalendarBtn.disabled = true;
+        try {
+            await this.timetableManager.downloadCalendar(this.currentDate);
+        } catch (error) {
+            this.showError('Failed to download calendar. Please try again.');
+        } finally {
+            this.downloadCalendarBtn.disabled = false;
+        }
     }
 
     showError(message) {

@@ -31,7 +31,9 @@
 }
 
 /* Reset and Base */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -80,8 +82,15 @@ body {
 }
 
 @keyframes shimmer {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
+
+    0%,
+    100% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
 }
 
 /* Header */
@@ -148,15 +157,27 @@ header h1 {
     animation: loader-bounce 1.4s ease-in-out infinite;
 }
 
-.loader-ring:nth-child(1) { animation-delay: -0.32s; }
-.loader-ring:nth-child(2) { animation-delay: -0.16s; }
-.loader-ring:nth-child(3) { animation-delay: 0s; }
+.loader-ring:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.loader-ring:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+.loader-ring:nth-child(3) {
+    animation-delay: 0s;
+}
 
 @keyframes loader-bounce {
-    0%, 80%, 100% {
+
+    0%,
+    80%,
+    100% {
         transform: scale(0.6);
         opacity: 0.5;
     }
+
     40% {
         transform: scale(1);
         opacity: 1;
@@ -176,7 +197,9 @@ header h1 {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* Controls */
@@ -436,8 +459,15 @@ header h1 {
 }
 
 @keyframes heartbeat {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.1); }
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.1);
+    }
 }
 
 .footer a {
@@ -467,8 +497,13 @@ header h1 {
 }
 
 @keyframes modalFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 .modal-content {
@@ -489,6 +524,7 @@ header h1 {
         transform: translateY(-30px) scale(0.95);
         opacity: 0;
     }
+
     to {
         transform: translateY(0) scale(1);
         opacity: 1;
@@ -517,7 +553,8 @@ header h1 {
     color: var(--primary-color);
 }
 
-.close, .close-date {
+.close,
+.close-date {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -531,7 +568,8 @@ header h1 {
     border: none;
 }
 
-.close:hover, .close-date:hover {
+.close:hover,
+.close-date:hover {
     background: #e2e8f0;
     color: var(--text-primary);
 }
@@ -722,7 +760,10 @@ header h1 {
 
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
+
+    *,
+    *::before,
+    *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
@@ -741,7 +782,9 @@ header h1 {
         padding: 20px;
     }
 
-    .timeline, .controls, .footer {
+    .timeline,
+    .controls,
+    .footer {
         display: none;
     }
 
@@ -750,4 +793,120 @@ header h1 {
         border: 1px solid #ccc;
         box-shadow: none;
     }
+}
+
+/* Sync Status Indicator */
+.sync-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    margin-top: 16px;
+    transition: all var(--transition-normal);
+}
+
+.sync-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font-size: 0.875rem;
+}
+
+.sync-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(59, 130, 246, 0.2);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.sync-status.syncing {
+    background: #eff6ff;
+    color: var(--primary-color);
+    border: 1px solid #bfdbfe;
+}
+
+.sync-status.uptodate {
+    background: #f0fdf4;
+    color: var(--success-color);
+    border: 1px solid #bbf7d0;
+}
+
+.sync-status.network-error {
+    background: #fefce8;
+    color: #ca8a04;
+    border: 1px solid #fef08a;
+}
+
+.sync-status.backend-error {
+    background: #fef2f2;
+    color: #ef4444;
+    border: 1px solid #fecaca;
+}
+
+/* Batch Search */
+.batch-search-container {
+    padding: 16px 24px 8px;
+}
+
+.search-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.search-icon {
+    position: absolute;
+    left: 12px;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+#batchSearchInput {
+    width: 100%;
+    padding: 12px 12px 12px 40px;
+    border: 2px solid var(--card-border);
+    border-radius: var(--radius-md);
+    font-size: 0.9375rem;
+    font-family: inherit;
+    color: var(--text-primary);
+    background: var(--card-background);
+    transition: all var(--transition-fast);
+}
+
+#batchSearchInput:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+#batchSearchInput::placeholder {
+    color: var(--text-muted);
+}
+
+/* Download Calendar Button */
+.btn-icon {
+    padding: 12px;
+    background: #f1f5f9;
+    color: var(--text-secondary);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
+}
+
+.btn-icon:hover:not(:disabled) {
+    background: #e2e8f0;
+    color: var(--text-primary);
+    border-color: var(--secondary-color);
+}
+
+.btn-icon:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
