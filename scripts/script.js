@@ -671,6 +671,9 @@ class UIManager {
                     // Update UI with fresh data
                     this.renderCourses(courses);
                     this.updateSyncStatus('uptodate');
+
+                    // Prefetch the next 7 days in background
+                    this.prefetchWeek();
                 } else {
                     this.updateSyncStatus('uptodate'); // Cache is still valid
                 }
@@ -679,6 +682,57 @@ class UIManager {
                 this.updateSyncStatus('network');
             }
         }, 100);
+    }
+
+    // Prefetch next 7 days of timetable data
+    prefetchWeek() {
+        // Don't prefetch if no batches selected
+        if (this.timetableManager.selectedBatches.size === 0) return;
+
+        console.log('📅 Prefetching week ahead...');
+
+        // Prefetch days 1-7 from current date (with delay between each to avoid rate limiting)
+        for (let i = 1; i <= 7; i++) {
+            setTimeout(async () => {
+                const targetDate = new Date(this.currentDate);
+                targetDate.setDate(targetDate.getDate() + i);
+
+                const dateKey = this.getDateKeyForDate(targetDate);
+
+                // Skip if already cached recently (within last hour)
+                const existingCache = this.loadCachedTimetable(dateKey);
+                if (existingCache) {
+                    const cacheData = localStorage.getItem(dateKey);
+                    if (cacheData) {
+                        try {
+                            const parsed = JSON.parse(cacheData);
+                            const cacheAge = Date.now() - parsed.timestamp;
+                            // Skip if cache is less than 1 hour old
+                            if (cacheAge < 60 * 60 * 1000) {
+                                console.log(`📅 Day +${i}: Already cached`);
+                                return;
+                            }
+                        } catch (e) { /* continue to fetch */ }
+                    }
+                }
+
+                try {
+                    const courses = await this.timetableManager.getCourses(targetDate);
+                    const isError = courses.length === 1 && (courses[0].isError || courses[0].isNoBatch);
+                    if (!isError) {
+                        this.cacheTimetable(dateKey, courses);
+                        console.log(`📅 Day +${i}: Cached`);
+                    }
+                } catch (error) {
+                    console.warn(`📅 Day +${i}: Failed to prefetch`);
+                }
+            }, i * 2000); // 2 second delay between each request
+        }
+    }
+
+    // Helper to get date key for any date
+    getDateKeyForDate(date) {
+        return `timetable_${date.getFullYear()}_${date.getMonth()}_${date.getDate()}_${Array.from(this.timetableManager.selectedBatches.keys()).join('_')}`;
     }
 
     updateSyncStatus(status) {
